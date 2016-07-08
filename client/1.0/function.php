@@ -231,6 +231,33 @@ function transaction_history_query($to_from, $last = 1)
 	// Ask one of my active peers
 	ini_set('user_agent', 'Timekoin Client v' . TIMEKOIN_VERSION);
 	ini_set('default_socket_timeout', 5); // Timeout for request in seconds
+	$cache_refresh_time = 60;
+
+	if($to_from == 1)
+	{	
+		$trans_history_sent_to = mysql_result(mysql_query("SELECT * FROM `data_cache` WHERE `field_name` = 'trans_history_sent_to' LIMIT 1"),0,"field_data");
+		$timestamp_cache = intval(find_string("---time=", "---last", $trans_history_sent_to));
+		$last_cache = intval(find_string("---last=", "---hdata", $trans_history_sent_to));
+
+		if(time() - $cache_refresh_time < $timestamp_cache && $last == $last_cache) // Cache TTL
+		{
+			// Return Cache Data
+			return find_string("---hdata=", "---hend", $trans_history_sent_to);
+		}
+	}
+
+	if($to_from == 2)
+	{
+		$trans_history_sent_from = mysql_result(mysql_query("SELECT * FROM `data_cache` WHERE `field_name` = 'trans_history_sent_from' LIMIT 1"),0,"field_data");
+		$timestamp_cache = intval(find_string("---time=", "---last", $trans_history_sent_from));
+		$last_cache = intval(find_string("---last=", "---hdata", $trans_history_sent_from));
+
+		if(time() - $cache_refresh_time < $timestamp_cache && $last == $last_cache) // Cache TTL
+		{
+			// Return Cache Data
+			return find_string("---hdata=", "---hend", $trans_history_sent_from);
+		}
+	}
 
 	$my_public_key = base64_encode(my_public_key());
 
@@ -276,6 +303,17 @@ function transaction_history_query($to_from, $last = 1)
 
 		if(strlen($poll_peer) > 60)
 		{
+			// Update data cache
+			if($to_from == 1)
+			{
+				mysql_query("UPDATE `data_cache` SET `field_data` = '---time=" . time() . "---last=$last---hdata=$poll_peer---hend' WHERE `data_cache`.`field_name` = 'trans_history_sent_to' LIMIT 1");
+			}
+
+			if($to_from == 2)
+			{
+				mysql_query("UPDATE `data_cache` SET `field_data` = '---time=" . time() . "---last=$last---hdata=$poll_peer---hend' WHERE `data_cache`.`field_name` = 'trans_history_sent_from' LIMIT 1");
+			}			
+			
 			return $poll_peer;
 		}
 	}
@@ -478,51 +516,21 @@ function tk_time_convert($time)
 //***********************************************************************************
 function db_cache_balance($my_public_key)
 {
-	// Check server balance via custom memory index
-	$my_server_balance = mysql_result(mysql_query("SELECT * FROM `balance_index` WHERE `public_key_hash` = 'server_timekoin_balance' LIMIT 1"),0,"balance");
-	$my_server_balance_last = mysql_result(mysql_query("SELECT * FROM `balance_index` WHERE `public_key_hash` = 'server_timekoin_balance' LIMIT 1"),0,"block");
+	$cache_refresh_time = 30; // Refresh TTL
+	
+	// Check server balance via cache
+	$billfold_balance = mysql_result(mysql_query("SELECT * FROM `data_cache` WHERE `field_name` = 'billfold_balance' LIMIT 1"),0,"field_data");
+	$timestamp_cache = intval(find_string("---time=", "---data", $billfold_balance));
 
-	if($my_server_balance === FALSE)
+	if(time() - $cache_refresh_time < $timestamp_cache) // Cache TTL
 	{
-		// Update record with the latest balance
-		$display_balance = check_crypt_balance($my_public_key);
-
-		if($display_balance == NULL)
-		{
-			// No response from any active peers
-		}
-		else
-		{
-			// Does not exist, needs to be created
-			mysql_query("INSERT INTO `balance_index` (`block` ,`public_key_hash` ,`balance`)VALUES ('0', 'server_timekoin_balance', '0')");
-			mysql_query("UPDATE `balance_index` SET `block` = '" . time() . "' , `balance` = '$display_balance' WHERE `balance_index`.`public_key_hash` = 'server_timekoin_balance' LIMIT 1");
-		}
-	}
-	else
-	{
-		if(time() - $my_server_balance_last > 30) // Update any balance older than 30 seconds
-		{
-			// Last generated balance is older than the current cycle, needs to be updated
-			// Update record with the latest balance
-			$display_balance = check_crypt_balance($my_public_key);
-
-			if($display_balance == NULL)
-			{
-				// No response from any active peers				
-				mysql_query("DELETE FROM `balance_index` WHERE `balance_index`.`public_key_hash` = 'server_timekoin_balance'");
-			}
-			else
-			{
-				mysql_query("UPDATE `balance_index` SET `block` = '" . time() . "' , `balance` = '$display_balance' WHERE `balance_index`.`public_key_hash` = 'server_timekoin_balance' LIMIT 1");
-			}
-		}
-		else
-		{
-			$display_balance = $my_server_balance;
-		}
+		// Return Cache Data
+		return intval(find_string("---data=", "---end", $billfold_balance));
 	}
 
-	return $display_balance;
+	$balance = check_crypt_balance($my_public_key); // Cache stale, refresh and update cache
+	mysql_query("UPDATE `data_cache` SET `field_data` = '---time=" . time() . "---data=$balance---end' WHERE `data_cache`.`field_name` = 'billfold_balance' LIMIT 1");
+	return $balance;
 }
 //***********************************************************************************
 //***********************************************************************************
@@ -696,7 +704,7 @@ function check_for_updates()
 {
 	// Poll timekoin.com for any program updates
 	$context = stream_context_create(array('http' => array('header'=>'Connection: close'))); // Force close socket after complete
-	ini_set('user_agent', 'Timekoin Server (GUI) v' . TIMEKOIN_VERSION);
+	ini_set('user_agent', 'Timekoin Client (GUI) v' . TIMEKOIN_VERSION);
 	ini_set('default_socket_timeout', 15); // Timeout for request in seconds
 
 	$update_check1 = 'Checking for Updates....</br></br>';
@@ -828,8 +836,8 @@ function do_updates()
 {
 	// Poll timekoin.com for any program updates
 	$context = stream_context_create(array('http' => array('header'=>'Connection: close'))); // Force close socket after complete
-	ini_set('user_agent', 'Timekoin Server (GUI) v' . TIMEKOIN_VERSION);
-	ini_set('default_socket_timeout', 30); // Timeout for request in seconds
+	ini_set('user_agent', 'Timekoin Client (GUI) v' . TIMEKOIN_VERSION);
+	ini_set('default_socket_timeout', 10); // Timeout for request in seconds
 
 	$poll_version = file_get_contents("https://timekoin.com/tkcliupdates/" . NEXT_VERSION, FALSE, $context, NULL, 10);
 
@@ -843,6 +851,11 @@ function do_updates()
 		$update_status .= run_script_update("CSS Template (admin.css)", "admin.css", $poll_version, $context, 0, "css");
 		//****************************************************
 		//****************************************************
+		//Check for javascript updates
+		$update_status .= 'Checking for <strong>Javascript Template</strong> Update...</br>';
+		$update_status .= run_script_update("Javascript Template (tkgraph.js)", "tkgraph.js", $poll_version, $context, 0, "js");
+		//****************************************************
+		//****************************************************
 		$update_status .= 'Checking for <strong>RSA Code</strong> Update...</br>';
 		$update_status .= run_script_update("RSA Code (RSA.php)", "RSA", $poll_version, $context);
 		//****************************************************
@@ -850,44 +863,17 @@ function do_updates()
 		$update_status .= run_script_update("Openssl Template (openssl.cnf)", "openssl.cnf", $poll_version, $context, 0);
 		//****************************************************
 		//****************************************************
-		$update_status .= 'Checking for <strong>Balace Indexer</strong> Update...</br>';
-		$update_status .= run_script_update("Balance Indexer (balance.php)", "balance", $poll_version, $context);
-		//****************************************************
-		$update_status .= 'Checking for <strong>Transaction Foundation Manager</strong> Update...</br>';
-		$update_status .= run_script_update("Transaction Foundation Manager (foundation.php)", "foundation", $poll_version, $context);
-		//****************************************************
-		$update_status .= 'Checking for <strong>Currency Generation Manager</strong> Update...</br>';
-		$update_status .= run_script_update("Currency Generation Manager (generation.php)", "generation", $poll_version, $context);
-		//****************************************************
-		$update_status .= 'Checking for <strong>Generation Peer Manager</strong> Update...</br>';
-		$update_status .= run_script_update("Generation Peer Manager (genpeer.php)", "genpeer", $poll_version, $context);
-		//****************************************************
 		$update_status .= 'Checking for <strong>Timekoin Web Interface</strong> Update...</br>';
 		$update_status .= run_script_update("Timekoin Web Interface (index.php)", "index", $poll_version, $context);
 		//****************************************************
-		$update_status .= 'Checking for <strong>Main Program</strong> Update...</br>';
-		$update_status .= run_script_update("Main Program (main.php)", "main", $poll_version, $context);
 		//****************************************************
-		$update_status .= 'Checking for <strong>Peer List Manager</strong> Update...</br>';
-		$update_status .= run_script_update("Peer List Manager (peerlist.php)", "peerlist", $poll_version, $context);
+		$update_status .= 'Checking for <strong>Timekoin Background Task</strong> Update...</br>';
+		$update_status .= run_script_update("Timekoin Background Task (task.php)", "task", $poll_version, $context);
 		//****************************************************
-		$update_status .= 'Checking for <strong>Transaction Queue Manager</strong> Update...</br>';
-		$update_status .= run_script_update("Transaction Queue Manager (queueclerk.php)", "queueclerk", $poll_version, $context);
-		//****************************************************
-		$update_status .= 'Checking for <strong>Timekoin Module Status</strong> Update...</br>';
-		$update_status .= run_script_update("Timekoin Module Status (status.php)", "status", $poll_version, $context);
 		//****************************************************
 		$update_status .= 'Checking for <strong>Web Interface Template</strong> Update...</br>';
 		$update_status .= run_script_update("Web Interface Template (templates.php)", "templates", $poll_version, $context);
 		//****************************************************
-		$update_status .= 'Checking for <strong>Transaction Clerk</strong> Update...</br>';
-		$update_status .= run_script_update("Transaction Clerk (transclerk.php)", "transclerk", $poll_version, $context);
-		//****************************************************
-		$update_status .= 'Checking for <strong>Treasurer Processor</strong> Update...</br>';
-		$update_status .= run_script_update("Treasurer Processor (treasurer.php)", "treasurer", $poll_version, $context);
-		//****************************************************
-		$update_status .= 'Checking for <strong>Process Watchdog</strong> Update...</br>';
-		$update_status .= run_script_update("Process Watchdog (watchdog.php)", "watchdog", $poll_version, $context);
 		//****************************************************
 		// We do the function storage last because it contains the version info.
 		// That way if some unknown error prevents updating the files above, this
@@ -896,7 +882,6 @@ function do_updates()
 		$update_status .= 'Checking for <strong>Function Storage</strong> Update...</br>';
 		$update_status .= run_script_update("Function Storage (function.php)", "function", $poll_version, $context);
 		//****************************************************
-
 		$finish_message = file_get_contents("https://timekoin.com/tkcliupdates/v$poll_version/ZZZfinish.txt", FALSE, $context, NULL);
 		$update_status .= '</br>' . $finish_message;
 	}

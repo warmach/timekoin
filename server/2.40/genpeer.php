@@ -1,7 +1,6 @@
 <?PHP
 include 'configuration.php';
 include 'function.php';
-set_time_limit(99);
 //***********************************************************************************
 //***********************************************************************************
 if(GENPEER_DISABLED == TRUE || TIMEKOIN_DISABLED == TRUE)
@@ -73,6 +72,7 @@ if($_GET["action"] == "gen_peer_list")
 //***********************************************************************************
 while(1) // Begin Infinite Loop
 {
+set_time_limit(99);	
 //***********************************************************************************
 $loop_active = mysql_result(mysql_query("SELECT * FROM `main_loop_status` WHERE `field_name` = 'genpeer_heartbeat_active' LIMIT 1"),0,"field_data");
 
@@ -91,6 +91,11 @@ else if($loop_active == 2) // Wake from sleep
 {
 	// Set the working status of 1
 	mysql_query("UPDATE `main_loop_status` SET `field_data` = '1' WHERE `main_loop_status`.`field_name` = 'genpeer_heartbeat_active' LIMIT 1");
+}
+else if($loop_active == 3) // Shutdown
+{
+	mysql_query("UPDATE `main_loop_status` SET `field_data` = '0' WHERE `main_loop_status`.`field_name` = 'genpeer_heartbeat_active' LIMIT 1");
+	exit;
 }
 else
 {
@@ -334,7 +339,11 @@ if(($next_generation_cycle - time()) > 35 && (time() - $current_generation_cycle
 	}
 //***********************************************************************************
 	// Scan for new election request of generating peers
-	if(election_cycle(1) == TRUE || election_cycle(2) == TRUE || election_cycle(3) == TRUE || election_cycle(4) == TRUE) // Don't queue election request until 1-3 cycles before election
+	if(election_cycle(1) == TRUE ||
+		election_cycle(2) == TRUE ||
+		election_cycle(3) == TRUE ||
+		election_cycle(4) == TRUE ||
+	  	election_cycle(5) == TRUE) // Don't queue election request until 1-5 cycles before election
 	{
 		$sql = "SELECT * FROM `transaction_queue` WHERE `attribute` = 'R'";
 		$sql_result = mysql_query($sql);
@@ -361,7 +370,6 @@ if(($next_generation_cycle - time()) > 35 && (time() - $current_generation_cycle
 					// Not found, add to queue
 					// Check to make sure this public key isn't forged or made up to win the list
 					$transaction_info = tk_decrypt($public_key, base64_decode($crypt1));
-
 
 					if($transaction_info == $crypt2)
 					{
@@ -439,6 +447,7 @@ if(($next_generation_cycle - time()) > 35 && (time() - $current_generation_cycle
 						$peer_domain = find_string("---domain=", "---subfolder", $crypt3_data);
 						$peer_subfolder = find_string("---subfolder=", "---port", $crypt3_data);
 						$peer_port_number = find_string("---port=", "---end", $crypt3_data);
+						$delete_request = find_string("---end=", "---end2", $crypt3_data);						
 
 						// Check if IP is already in the generation peer list
 						$IP_exist1 = mysql_result(mysql_query("SELECT * FROM `generating_peer_list` WHERE `IP_Address` = '$peer_ip' LIMIT 1"),0,1);
@@ -472,8 +481,17 @@ if(($next_generation_cycle - time()) > 35 && (time() - $current_generation_cycle
 							$domain_fail == FALSE && 
 							is_private_ip($peer_ip) == FALSE) // Filter private IPs
 						{
-							mysql_query("UPDATE `generating_peer_list` SET `IP_Address` = '$peer_ip' WHERE `generating_peer_list`.`public_key` = '$public_key' LIMIT 1");
-							write_log("New Generation Peer IP Address ($peer_ip) was updated for Public Key: " . base64_encode($public_key), "GP");
+							if($delete_request == "DELETE_IP")
+							{
+								// Delete my IP and any public key linked to it as it belongs to a previous unknown owner
+								mysql_query("DELETE FROM `generating_peer_list` WHERE `generating_peer_list`.`IP_Address` = '$peer_ip' LIMIT 1");
+							}
+							else
+							{
+								// My server has moved to another IP, update the list
+								mysql_query("UPDATE `generating_peer_list` SET `IP_Address` = '$peer_ip' WHERE `generating_peer_list`.`public_key` = '$public_key' LIMIT 1");
+								write_log("New Generation Peer IP Address ($peer_ip) was updated for Public Key: " . base64_encode($public_key), "GP");
+							}
 						}
 						else if(my_public_key() == $public_key) // This is my own public key, automatic update
 						{
@@ -501,6 +519,16 @@ if(($next_generation_cycle - time()) > 35 && (time() - $current_generation_cycle
 
 //***********************************************************************************
 //***********************************************************************************
+$loop_active = mysql_result(mysql_query("SELECT * FROM `main_loop_status` WHERE `field_name` = 'genpeer_heartbeat_active' LIMIT 1"),0,"field_data");
+
+// Check script status
+if($loop_active == 3)
+{
+	// Time to exit
+	mysql_query("UPDATE `main_loop_status` SET `field_data` = '0' WHERE `main_loop_status`.`field_name` = 'genpeer_heartbeat_active' LIMIT 1");
+	exit;
+}
+
 // Script finished, set standby status to 2
 mysql_query("UPDATE `main_loop_status` SET `field_data` = '2' WHERE `main_loop_status`.`field_name` = 'genpeer_heartbeat_active' LIMIT 1");
 

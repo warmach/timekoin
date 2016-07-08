@@ -253,10 +253,12 @@ function my_domain()
 //***********************************************************************************
 function modify_peer_grade($ip_address, $domain, $subfolder, $port_number, $grade)
 {
-	$peer_failure = mysql_result(mysql_query("SELECT failed_sent_heartbeat FROM `active_peer_list` WHERE `IP_Address` = '$ip_address' OR `domain` = '$domain' AND `subfolder` = '$subfolder' AND `port_number` = $port_number LIMIT 1"),0,0);
+	$peer_failure = mysql_result(mysql_query("SELECT failed_sent_heartbeat FROM `active_peer_list` WHERE `IP_Address` = '$ip_address' AND `domain` = '$domain' AND `subfolder` = '$subfolder' AND `port_number` = $port_number LIMIT 1"),0,0);
 	$peer_failure += $grade;
-	if($peer_failure < 0) { $peer_failure = 0; } // Range fixing
-	mysql_query("UPDATE `active_peer_list` SET `failed_sent_heartbeat` = '$peer_failure' WHERE `IP_Address` = '$ip_address' AND `domain` = '$domain' AND `subfolder` = '$subfolder' AND `port_number` = $port_number LIMIT 1");
+	if($peer_failure >= 0)
+	{
+		mysql_query("UPDATE `active_peer_list` SET `failed_sent_heartbeat` = $peer_failure WHERE `IP_Address` = '$ip_address' AND `domain` = '$domain' AND `subfolder` = '$subfolder' AND `port_number` = $port_number LIMIT 1");
+	}
 	return;
 }
 //***********************************************************************************
@@ -1862,7 +1864,39 @@ function find_file($dir, $pattern)
 }
 //***********************************************************************************
 //***********************************************************************************
-function generate_hashcode_permissions($pk_balance, $pk_gen_amt, $pk_recv, $send_tk, $pk_history, $pk_valid, $tk_trans_total)
+function update_windows_port($new_port)
+{
+	// Update the pms_config.ini file if it exist
+	if(file_exists("../../pms_config.ini") == TRUE)
+	{
+		//Previous port number
+		$old_port = mysql_result(mysql_query("SELECT * FROM `options` WHERE `field_name` = 'server_port_number' LIMIT 1"),0,"field_data");
+
+		if($old_port != $new_port)// Don't change unless different than before
+		{
+			$pms_config = file_get_contents('../../pms_config.ini');
+			$new_pms_config = str_replace("Port=$old_port", "Port=$new_port", $pms_config);
+
+			// Write new configuration file back to drive
+			$fh = fopen('../../pms_config.ini', 'w');
+
+			if($fh != FALSE)
+			{
+				if(fwrite($fh, $new_pms_config) > 0)
+				{
+					if(fclose($fh) == TRUE)
+					{
+						return TRUE;
+					}
+				}
+			}
+		}
+	}
+	return;
+}
+//***********************************************************************************
+//***********************************************************************************
+function generate_hashcode_permissions($pk_balance, $pk_gen_amt, $pk_recv, $send_tk, $pk_history, $pk_valid, $tk_trans_total, $pk_sent, $pk_gen_total)
 {
 	$permissions_number;
 
@@ -1873,13 +1907,57 @@ function generate_hashcode_permissions($pk_balance, $pk_gen_amt, $pk_recv, $send
 	if($pk_history == 1) { $permissions_number += 16; }
 	if($pk_valid == 1) { $permissions_number += 32; }
 	if($tk_trans_total == 1) { $permissions_number += 64; }
+	if($pk_sent == 1) { $permissions_number += 128; }
+	if($pk_gen_total == 1) { $permissions_number += 256; }
 
 	return $permissions_number;
 }
 //***********************************************************************************
 function check_hashcode_permissions($permissions_number, $pk_api_check, $checkbox = FALSE)
 {
-	// Check pk_valid
+	// pk_gen_total
+	if($pk_api_check == "pk_gen_total")
+	{ 
+		if($permissions_number >= 256) // Permission Granted
+		{
+			if($checkbox == TRUE)
+			{
+				return "CHECKED";
+			}
+			else
+			{
+				return TRUE;
+			}
+		}
+		else
+		{
+			return FALSE;
+		}
+	}
+	if($permissions_number - 256 >= 0) { $permissions_number -= 256; } // Subtract Active Permission
+
+	// pk_sent
+	if($pk_api_check == "pk_sent")
+	{ 
+		if($permissions_number >= 128) // Permission Granted
+		{
+			if($checkbox == TRUE)
+			{
+				return "CHECKED";
+			}
+			else
+			{
+				return TRUE;
+			}
+		}
+		else
+		{
+			return FALSE;
+		}
+	}
+	if($permissions_number - 128 >= 0) { $permissions_number -= 128; } // Subtract Active Permission
+
+	// tk_trans_total
 	if($pk_api_check == "tk_trans_total")
 	{ 
 		if($permissions_number >= 64) // Permission Granted
@@ -1900,7 +1978,7 @@ function check_hashcode_permissions($permissions_number, $pk_api_check, $checkbo
 	}
 	if($permissions_number - 64 >= 0) { $permissions_number -= 64; } // Subtract Active Permission
 
-	// Check pk_valid
+	// pk_valid
 	if($pk_api_check == "pk_valid")
 	{ 
 		if($permissions_number >= 32) // Permission Granted
@@ -1921,7 +1999,7 @@ function check_hashcode_permissions($permissions_number, $pk_api_check, $checkbo
 	}
 	if($permissions_number - 32 >= 0) { $permissions_number -= 32; } // Subtract Active Permission
 
-	// Check pk_history
+	// pk_history
 	if($pk_api_check == "pk_history")
 	{ 
 		if($permissions_number >= 16) // Permission Granted
@@ -1942,7 +2020,7 @@ function check_hashcode_permissions($permissions_number, $pk_api_check, $checkbo
 	}
 	if($permissions_number - 16 >= 0) { $permissions_number -= 16; } // Subtract Active Permission
 
-	// Check send_tk
+	// send_tk
 	if($pk_api_check == "send_tk")
 	{ 
 		if($permissions_number >= 8) // Permission Granted
@@ -1963,7 +2041,7 @@ function check_hashcode_permissions($permissions_number, $pk_api_check, $checkbo
 	}
 	if($permissions_number - 8 >= 0) { $permissions_number -= 8; } // Subtract Active Permission
 
-	// Check pk_recv
+	// pk_recv
 	if($pk_api_check == "pk_recv")
 	{ 
 		if($permissions_number >= 4) // Permission Granted
@@ -1984,7 +2062,7 @@ function check_hashcode_permissions($permissions_number, $pk_api_check, $checkbo
 	}
 	if($permissions_number - 4 >= 0) { $permissions_number -= 4; } // Subtract Active Permission
 
-	// Check pk_gen_amt
+	// pk_gen_amt
 	if($pk_api_check == "pk_gen_amt")
 	{ 
 		if($permissions_number >= 2) // Permission Granted
@@ -2005,7 +2083,7 @@ function check_hashcode_permissions($permissions_number, $pk_api_check, $checkbo
 	}
 	if($permissions_number - 2 >= 0) { $permissions_number -= 2; } // Subtract Active Permission
 
-	// Check pk_balance
+	// pk_balance
 	if($pk_api_check == "pk_balance") // Permission Granted
 	{ 
 		if($permissions_number >= 1) // Permission Granted
