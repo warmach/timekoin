@@ -1,4 +1,9 @@
 <?PHP
+
+error_reporting(E_ERROR | E_CORE_ERROR | E_COMPILE_ERROR); // Disable most error reporting except for fatal errors
+ini_set('display_errors', FALSE);
+
+include 'configuration.php';
 include 'status.php';
 
 define("TRANSACTION_EPOCH","1338576300"); // Epoch timestamp: 1338576300
@@ -7,8 +12,26 @@ define("SHA256TEST","8c49a2b56ebd8fc49a17956dc529943eb0d73c00ee6eafa5d8b3ba1274e
 define("TIMEKOIN_VERSION","4.0"); // This Timekoin Software Version
 define("NEXT_VERSION","current_version51.txt"); // What file to check for future versions
 
-error_reporting(E_ERROR | E_CORE_ERROR | E_COMPILE_ERROR); // Disable most error reporting except for fatal errors
-ini_set('display_errors', FALSE);
+//***********************************************************************************
+//  Function to get PDO object for database interaction
+//***********************************************************************************
+function get_PDO()
+{
+	$host = MYSQL_IP;
+	$db   = MYSQL_DATABASE;
+	$user = MYSQL_USERNAME;
+	$pass = MYSQL_PASSWORD;
+	$charset = 'utf8';
+
+	$dsn = "mysql:host=$host;dbname=$db;charset=$charset";
+	$opt = [
+		PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+		PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+		PDO::ATTR_EMULATE_PREPARES   => false,
+	];
+	$pdo = new PDO($dsn, $user, $pass, $opt);
+	return $pdo;
+}
 
 //***********************************************************************************
 //***********************************************************************************

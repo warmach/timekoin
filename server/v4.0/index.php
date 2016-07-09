@@ -1,10 +1,11 @@
 <?PHP
 include 'templates.php';
 include 'function.php';
-include 'configuration.php';
 set_time_limit(99);
 session_name("timekoin");
 session_start();
+
+$pdo = get_PDO();
 
 if($_SESSION["valid_login"] == FALSE && $_GET["action"] != "login")
 {
